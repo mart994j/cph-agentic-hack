@@ -193,12 +193,14 @@ a { color: var(--cph-horizon-blue); }
 .heatmap-cell--warn { background: var(--status-warn); color: var(--status-on-warn); }
 .heatmap-cell--critical { background: var(--status-critical); color: var(--status-on-critical); }
 .forecast-chart-wrap {
-  position: relative;
-  min-height: 320px;
   background: var(--cph-white);
   border: 1px solid var(--cph-misty-grey);
   border-radius: var(--radius-card);
   padding: var(--space-3);
+}
+.forecast-chart-container {
+  position: relative;
+  height: 320px;
 }
 
 .placeholder {

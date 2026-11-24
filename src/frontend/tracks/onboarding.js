@@ -105,7 +105,10 @@ function renderForecast(container, forecasts) {
 
   const wrap = document.createElement("div");
   wrap.className = "forecast-chart-wrap";
-  wrap.append(canvas, caption);
+  const chartContainer = document.createElement("div");
+  chartContainer.className = "forecast-chart-container";
+  chartContainer.append(canvas);
+  wrap.append(chartContainer, caption);
   container.append(wrap);
 
   if (!window.Chart) return;
