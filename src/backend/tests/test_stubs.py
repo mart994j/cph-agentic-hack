@@ -9,8 +9,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 STUBS = [
-    ("GET", "/api/onboarding/queues", None, "onboarding"),
-    ("GET", "/api/onboarding/forecast", None, "onboarding"),
     ("GET", "/api/flights", None, "flights"),
     ("GET", "/api/flights/routes", None, "flights"),
     ("GET", "/api/disruptions/active", None, "disruptions"),
