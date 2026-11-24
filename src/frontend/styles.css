@@ -220,6 +220,12 @@ a { color: var(--cph-horizon-blue); }
 }
 .board td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--cph-misty-grey); font-variant-numeric: tabular-nums; }
 .board tbody tr:nth-child(even) { background: var(--cph-clear-sky-white); }
+.flight-direction-toggle { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.flight-direction-toggle [aria-pressed="true"] {
+  background: var(--cph-horizon-blue);
+  color: var(--cph-white);
+}
+.flight-table-wrap { overflow-x: auto; }
 
 /* ---------------------------------------------------------------- status chips (colour + label) */
 

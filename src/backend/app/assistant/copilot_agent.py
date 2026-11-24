@@ -29,13 +29,18 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
+import os
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 
 from backend.app.db import engine
-from backend.app.models import Checkpoint, Terminal
+from backend.app.models import Checkpoint, Direction, FlightStatus, Terminal
+from backend.app.routers.flights import flights_for_assistant
 from backend.app.routers.onboarding import forecast_waits
 
 SYSTEM_MESSAGE = """\
@@ -47,6 +52,7 @@ All data in this system is synthetic workshop data."""
 
 _client: Any | None = None  # the running CopilotClient, once started
 _sessions: dict[str, Any] = {}  # chat session id -> Copilot session
+logger = logging.getLogger(__name__)
 
 
 class QueueForecastParams(BaseModel):
@@ -57,6 +63,14 @@ class QueueForecastParams(BaseModel):
     hours: int = Field(default=3, ge=1, le=24, description="Forecast horizon in hours")
 
 
+class FlightsParams(BaseModel):
+    """Parameters for the upcoming flight search tool."""
+
+    direction: Direction | None = Field(default=None, description="DEP or ARR; omit for both")
+    hours_ahead: int = Field(default=2, ge=1, le=24, description="Look-ahead window in hours")
+    status: FlightStatus | None = Field(default=None, description="Optional exact flight status filter")
+
+
 def sdk_installed() -> bool:
     """Return True when the ``copilot`` package can be imported (no runtime check)."""
     return importlib.util.find_spec("copilot") is not None
@@ -64,20 +78,37 @@ def sdk_installed() -> bool:
 
 async def start_client() -> None:
     """Start the shared Copilot client. Call once from the FastAPI lifespan."""
-    # HACK(assistant): TODO 1 - start the client.
-    #   from copilot import CopilotClient
-    #   global _client
-    #   _client = CopilotClient()          # uses your signed-in GitHub/Copilot user
-    #   await _client.start()
-    #   Wrap it in try/except: log a warning and leave _client = None if it fails,
-    #   so the rest of the app keeps working without the assistant.
-    raise NotImplementedError("HACK(assistant): start the Copilot client")
+    global _client
+    if _client is not None:
+        return
+    try:
+        from copilot import CopilotClient
+
+        client = CopilotClient()
+        await client.start()
+        _client = client
+    except Exception:
+        logger.warning("Copilot SDK did not start; the rest of the app remains available", exc_info=True)
 
 
 async def stop_client() -> None:
     """Stop the shared Copilot client on shutdown (safe to call when it never started)."""
-    # HACK(assistant): disconnect sessions in _sessions, then `await _client.stop()`.
-    return None
+    global _client
+    client = _client
+    _client = None
+    sessions = list(_sessions.values())
+    _sessions.clear()
+    try:
+        for session in sessions:
+            await session.disconnect()
+    finally:
+        if client is not None:
+            await client.stop()
+
+
+def client_ready() -> bool:
+    """Return whether the shared Copilot SDK client is running."""
+    return _client is not None
 
 
 def build_tools() -> list[Any]:
@@ -105,26 +136,53 @@ def build_tools() -> list[Any]:
                 )
                 return json.dumps(forecasts[:50], default=str)
 
-        return [get_queue_forecast]
+        @define_tool(
+            name="get_flights",
+            description="List upcoming CPH arrivals or departures, optionally filtered by status. "
+                        "Times are Europe/Copenhagen; results are synthetic and limited to 50 flights.",
+            skip_permission=True,
+        )
+        async def get_flights(params: FlightsParams) -> str:
+            """Return compact JSON for upcoming flights."""
+            try:
+                with Session(engine) as session:
+                    flights = flights_for_assistant(
+                        session,
+                        direction=params.direction,
+                        hours_ahead=params.hours_ahead,
+                        status=params.status,
+                    )
+                return json.dumps(flights, default=str)
+            except SQLAlchemyError:
+                logger.exception("Could not retrieve flight data for the assistant")
+                return json.dumps({"error": "Flight data is temporarily unavailable"})
+
+        return [get_queue_forecast, get_flights]
     except (ImportError, RuntimeError):
         return []
 
 
 async def ask(message: str, session_id: str | None = None) -> tuple[str, str]:
     """Send ``message`` to the assistant and return ``(reply_text, session_id)``."""
-    # HACK(assistant): TODO 2 - create (or reuse) a session with the system message:
-    #   session = await _client.create_session(
-    #       on_permission_request=<a handler that only approves your own tools>,
-    #       model=os.environ.get("COPILOT_MODEL") or None,   # optional, see .env.example
-    #       system_message={"mode": "append", "content": SYSTEM_MESSAGE},
-    #       tools=build_tools(),
-    #   )
-    #   Keep it in _sessions under a new id (uuid4) when session_id is None.
-    #   Never auto-approve built-in shell or file-write tools for a chat assistant.
-    #
-    # HACK(assistant): TODO 4 - collect (or stream) the reply:
-    #   event = await session.send_and_wait(message, timeout=60)
-    #   reply = event.data.content if event else "(no reply)"
-    #   For streaming, pass streaming=True to create_session and handle
-    #   assistant.message_delta events via session.on(...) - see the SDK README.
-    raise NotImplementedError("HACK(assistant): send the message through a Copilot session")
+    if _client is None:
+        raise RuntimeError("Copilot SDK client is not running")
+
+    session = _sessions.get(session_id) if session_id else None
+    if session is None:
+        from copilot import PermissionRequestResult
+
+        def reject_non_app_tools(request: Any, invocation: Any) -> Any:
+            return PermissionRequestResult(kind="denied-interactively-by-user")
+
+        session = await _client.create_session(
+            on_permission_request=reject_non_app_tools,
+            model=os.environ.get("COPILOT_MODEL") or None,
+            system_message={"mode": "append", "content": SYSTEM_MESSAGE},
+            tools=build_tools(),
+        )
+        session_id = session.session_id or str(uuid4())
+        _sessions[session_id] = session
+
+    event = await session.send_and_wait(message, timeout=60)
+    reply = event.data.content if event is not None and event.data is not None else "No reply was returned."
+    return reply, session_id

@@ -43,7 +43,6 @@
           <span class="kpi__label">Security wait T3</span>
           <span class="kpi__value">--</span><span class="kpi__unit">min</span>
         </li>
-        <!-- HACK(flights): fill "Departures next hour" from GET /api/flights -->
         <li class="kpi" data-kpi="departures-next-hour">
           <span class="kpi__label">Departures next hour</span>
           <span class="kpi__value">--</span><span class="kpi__unit">flights</span>
@@ -55,12 +54,11 @@
         </li>
       </ul>
 
-      <!-- HACK(flights): enable the flight search (filter the board by flight number or destination) -->
       <form class="flight-search" role="search" aria-label="Find departures and arrivals" onsubmit="return false">
         <label for="flight-search-input" class="flight-search__label">Find departures and arrivals</label>
         <div class="flight-search__row">
-          <input id="flight-search-input" class="input" type="search" placeholder="Flight number or destination, e.g. SK1415 or London" disabled>
-          <button class="btn btn--primary" type="submit" disabled>Search</button>
+          <input id="flight-search-input" class="input" type="search" placeholder="Flight number or destination, e.g. SK1415 or London">
+          <button class="btn btn--primary" type="submit">Search</button>
         </div>
       </form>
     </section>
