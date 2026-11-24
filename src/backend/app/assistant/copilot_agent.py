@@ -28,7 +28,15 @@ Guide: docs/assistant-and-finale.md
 from __future__ import annotations
 
 import importlib.util
+import json
 from typing import Any
+
+from pydantic import BaseModel, Field
+from sqlmodel import Session
+
+from backend.app.db import engine
+from backend.app.models import Checkpoint, Terminal
+from backend.app.routers.onboarding import forecast_waits
 
 SYSTEM_MESSAGE = """\
 You are the CPH Ops Assistant, an operations co-pilot for Copenhagen Airport (CPH).
@@ -39,6 +47,14 @@ All data in this system is synthetic workshop data."""
 
 _client: Any | None = None  # the running CopilotClient, once started
 _sessions: dict[str, Any] = {}  # chat session id -> Copilot session
+
+
+class QueueForecastParams(BaseModel):
+    """Parameters for the passenger queue forecast tool."""
+
+    terminal: Terminal | None = Field(default=None, description="Terminal T2 or T3; omit for both")
+    checkpoint: Checkpoint = Field(default=Checkpoint.SECURITY, description="Checkpoint to forecast")
+    hours: int = Field(default=3, ge=1, le=24, description="Forecast horizon in hours")
 
 
 def sdk_installed() -> bool:
@@ -66,22 +82,32 @@ async def stop_client() -> None:
 
 def build_tools() -> list[Any]:
     """Return the Copilot SDK tools exposed to the assistant. Empty until tracks add theirs."""
-    # HACK(assistant): TODO 3 - register tools. Each track adds ONE read-only tool, e.g.:
-    #   from copilot import define_tool
-    #   from pydantic import BaseModel, Field
-    #
-    #   class FlightsAtRiskParams(BaseModel):            # define at module level
-    #       hours: int = Field(default=2, description="Look-ahead window in hours")
-    #
-    #   @define_tool(description="List CPH flights at risk of delay in the next hours",
-    #                skip_permission=True)               # OK for read-only tools only
-    #   async def get_flights_at_risk(params: FlightsAtRiskParams) -> str:
-    #       ...query the DB, return compact JSON text...
-    #
-    #   Planned tools: get_queue_forecast (onboarding), get_flights (flights),
-    #   get_disruption_impact (disruptions), get_bags_at_risk (gates), plus cross-track
-    #   helpers such as get_flights_at_risk, get_active_disruptions, get_pax_connections.
-    return []
+    if not sdk_installed():
+        return []
+
+    try:
+        from copilot import define_tool
+
+        @define_tool(
+            name="get_queue_forecast",
+            description="Return the CPH passenger queue wait forecast for a terminal and checkpoint. "
+                        "Times are Europe/Copenhagen and waits are minutes.",
+            skip_permission=True,
+        )
+        async def get_queue_forecast(params: QueueForecastParams) -> str:
+            """Return compact JSON for passenger queue forecasts."""
+            with Session(engine) as session:
+                forecasts = forecast_waits(
+                    session,
+                    terminal=params.terminal,
+                    checkpoint=params.checkpoint,
+                    hours=params.hours,
+                )
+                return json.dumps(forecasts[:50], default=str)
+
+        return [get_queue_forecast]
+    except (ImportError, RuntimeError):
+        return []
 
 
 async def ask(message: str, session_id: str | None = None) -> tuple[str, str]:
