@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from backend.app.assistant import copilot_agent
 from backend.app.db import create_db_and_tables, db_has_data
 from backend.app.routers import (
     airports,
@@ -30,9 +31,11 @@ FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     create_db_and_tables()
-    # HACK(assistant): start the Copilot SDK client once here (see assistant/copilot_agent.py)
-    # and stop it after the `yield`. The app must still start if the SDK is unavailable.
-    yield
+    await copilot_agent.start_client()
+    try:
+        yield
+    finally:
+        await copilot_agent.stop_client()
 
 
 app = FastAPI(
@@ -53,8 +56,11 @@ class HealthOut(BaseModel):
 @app.get("/api/health", response_model=HealthOut, tags=["health"])
 def health() -> HealthOut:
     """Liveness check used by the header indicator and the smoke tests."""
-    # HACK(assistant): report "ready" here once the Copilot SDK client has started.
-    return HealthOut(status="ok", db=db_has_data(), copilot_sdk="not-configured")
+    return HealthOut(
+        status="ok",
+        db=db_has_data(),
+        copilot_sdk="ready" if copilot_agent.client_ready() else "not-configured",
+    )
 
 
 for router_module in (airports, onboarding, flights, disruptions, gates, automation, assistant):

@@ -9,8 +9,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 STUBS = [
-    ("GET", "/api/flights", None, "flights"),
-    ("GET", "/api/flights/routes", None, "flights"),
     ("GET", "/api/disruptions/active", None, "disruptions"),
     ("GET", "/api/disruptions/1/impact", None, "disruptions"),
     ("GET", "/api/gates/allocations", None, "gates"),
@@ -18,7 +16,6 @@ STUBS = [
     ("GET", "/api/baggage/at-risk", None, "gates"),
     ("POST", "/api/automation/actions", {"action_type": "NOTIFY", "payload": {}}, "disruptions"),
     ("GET", "/api/automation/actions", None, "disruptions"),
-    ("POST", "/api/assistant/chat", {"message": "hello"}, "assistant"),
 ]
 
 

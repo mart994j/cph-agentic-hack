@@ -7,6 +7,8 @@ The chat drawer in the UI switches on automatically once this stops returning 50
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.app.assistant import copilot_agent
+
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 
 
@@ -25,8 +27,9 @@ class ChatOut(BaseModel):
 @router.post("/chat", response_model=ChatOut)
 async def chat(body: ChatIn) -> ChatOut:
     """Send the user's message to the CPH Ops Assistant and return its reply."""
-    # HACK(assistant): call backend.app.assistant.copilot_agent.ask(...) and return the reply
-    raise HTTPException(
-        status_code=501,
-        detail="HACK(assistant): wire POST /api/assistant/chat to the Copilot SDK (assistant/copilot_agent.py)",
-    )
+    if not body.message.strip():
+        raise HTTPException(status_code=400, detail="Message must not be empty")
+    if not copilot_agent.client_ready():
+        raise HTTPException(status_code=503, detail="Copilot SDK client is not running")
+    reply, session_id = await copilot_agent.ask(body.message.strip(), body.session_id)
+    return ChatOut(reply=reply, session_id=session_id)
